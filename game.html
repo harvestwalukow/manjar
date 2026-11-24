@@ -454,12 +454,13 @@ body { min-width: 320px; }
 .seal-hud li.active { border-color: #ffbd59; color: #ffbd59; box-shadow: 0 0 12px #ffb44655; }
 .seal-hud li[data-status="solved"] { background: #ffb94e; color: #1e150d; border-color: #ffbd59; }
 .seal-hud svg { width: 50%; height: 50%; }
-.room-score { display: flex; align-items: stretch; gap: 14px; padding: 7px 13px; }
-.room-score div:not([data-slot="separator"]) { display: grid; gap: 1px; }
-.room-score span { font-size: .84rem; color: #e6d3bf; }
-.room-score strong { font-size: clamp(1.15rem, 2vw, 1.7rem); line-height: 1.06; }
-.room-score strong span { color: inherit; font-size: inherit; }
-.room-score [data-slot="separator"] { height: auto; }
+.room-score { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); padding: 7px 0; }
+.room-score div { display: grid; gap: 2px; padding-inline: 12px; }
+.room-score div + div { border-left: 1px solid #8c725a80; }
+.room-score dt { font-size: .82rem; color: #e6d3bf; white-space: nowrap; }
+.room-score dd { margin: 0; font-size: clamp(1.15rem, 2vw, 1.7rem); font-weight: 700; line-height: 1.06; font-variant-numeric: tabular-nums; }
+.room-score [data-score="level"] { color: #ffcb7c; }
+.mission-card .room-score { margin-top: 8px; }
 .reticle { pointer-events: none; position: fixed; top: 50%; left: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%); filter: drop-shadow(0 1px 2px #000); }
 .reticle::before, .reticle::after { position: absolute; content: ""; background: #fff2dc; border-radius: 2px; }
 .reticle::before { width: 18px; height: 2px; top: 8px; }
@@ -501,8 +502,8 @@ body { min-width: 320px; }
   .touch-moves button:nth-child(2) { grid-column: 1; }
 }
 @media (max-width: 560px) {
-  .room-hud { gap: 6px; }
-  .seal-hud, .room-score { padding: 6px 8px; }
+  .room-hud { display: grid; gap: 6px; }
+  .seal-hud { padding: 6px 8px; }
   .seal-hud { gap: 5px; }
   .seal-hud ol { gap: 3px; }
   .seal-hud li { width: 22px; }
@@ -5013,6 +5014,8 @@ const last = missions.length - 1;
 const finish = missions.length;
 const maximum = 1e3;
 const hintCost = 150;
+const elapsedFor = (record, since, now) => record.elapsed + (record.status === "open" ? now - since : 0);
+const scoreFor = (elapsed, hints) => Math.max(100, maximum - Math.floor(elapsed / 1e3) * 4 - hints * hintCost);
 const answerInputId = "answer";
 const clueTitles = ["Cermin di meja", "Roda huruf", "Radio kurir", "Gulungan pita", "Miniatur rel", "Kartu simbol", "Buku arsip"];
 const freshGame = (now) => ({
@@ -5023,7 +5026,7 @@ const freshGame = (now) => ({
 function gameReducer(state, action) {
   const { page, records, since } = state;
   const current = records[page];
-  const currentElapsed = current?.status === "open" ? current.elapsed + action.now - since : 0;
+  const currentElapsed = current?.status === "open" ? elapsedFor(current, since, action.now) : 0;
   const replaceCurrent = (next) => records.map((record, index) => index === page ? next : record);
   switch (action.type) {
     case "reset":
@@ -5040,7 +5043,7 @@ function gameReducer(state, action) {
       return { ...state, records: replaceCurrent({ ...current, hints: action.count }) };
     case "solve": {
       if (current.status !== "open") return state;
-      const score = Math.max(100, maximum - Math.floor(currentElapsed / 1e3) * 4 - current.hints * hintCost);
+      const score = scoreFor(currentElapsed, current.hints);
       return {
         ...state,
         records: replaceCurrent({ ...current, status: "solved", elapsed: currentElapsed, score })
@@ -5050,16 +5053,17 @@ function gameReducer(state, action) {
       throw new Error("Aksi game tidak dikenal: " + action.type);
   }
 }
-function Timer({ record, since }) {
+function ScoreStats({ record, since, total }) {
   const [, redraw] = useState(0);
   useEffect(() => {
     if (record.status !== "open") return;
     const timer = setInterval(() => redraw((tick) => tick + 1), 250);
     return () => clearInterval(timer);
   }, [record.status]);
-  const milliseconds = record.elapsed + (record.status === "open" ? performance.now() - since : 0);
+  const milliseconds = elapsedFor(record, since, performance.now());
   const seconds = Math.floor(milliseconds / 1e3);
-  return /* @__PURE__ */ React.createElement("span", { className: "font-mono tabular-nums" }, number(Math.floor(seconds / 60)), ":", number(seconds % 60));
+  const levelScore = record.status === "solved" ? record.score : scoreFor(milliseconds, record.hints);
+  return /* @__PURE__ */ React.createElement("dl", { className: "room-score", "aria-label": "Waktu dan skor" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("dt", null, "Waktu"), /* @__PURE__ */ React.createElement("dd", { className: "font-mono tabular-nums" }, number(Math.floor(seconds / 60)), ":", number(seconds % 60))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("dt", null, "Skor level"), /* @__PURE__ */ React.createElement("dd", { "data-score": "level" }, points.format(levelScore))), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("dt", null, "Skor total"), /* @__PURE__ */ React.createElement("dd", { "data-score": "total" }, points.format(total))));
 }
 function PigpenIcon({ token }) {
   const [family, position, dotted] = token.split("-");
@@ -5259,9 +5263,9 @@ function Results({ records, score, escaped, onReplay }) {
     return /* @__PURE__ */ React.createElement("li", { key: level.title }, /* @__PURE__ */ React.createElement(Badge, { variant: "outline" }, number(index + 1)), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, level.algorithm, level.type === "caesar" && (level.showKey ? " \xB7 geser " + level.key : " \xB7 cari kunci")), /* @__PURE__ */ React.createElement("p", null, level.explanation)), /* @__PURE__ */ React.createElement(Badge, { variant: record.status === "solved" ? "default" : "secondary" }, record.status === "solved" ? points.format(record.score) + " poin" : "Belum selesai"));
   }))), /* @__PURE__ */ React.createElement(CardFooter, null, /* @__PURE__ */ React.createElement(Button, { size: "lg", onClick: onReplay }, "Main lagi")));
 }
-function MissionView({ page, record, go, dispatch }) {
+function MissionView({ page, record, since, score, go, dispatch }) {
   const level = missions[page];
-  return /* @__PURE__ */ React.createElement("div", { className: "mission-layout" }, /* @__PURE__ */ React.createElement(Card, { className: "mission-card" }, /* @__PURE__ */ React.createElement(CardHeader, null, /* @__PURE__ */ React.createElement(Badge, { variant: "secondary" }, "Level ", number(page + 1), " / ", number(missions.length)), /* @__PURE__ */ React.createElement(CardTitle, null, /* @__PURE__ */ React.createElement("h1", { tabIndex: -1 }, level.title)), /* @__PURE__ */ React.createElement(CardDescription, null, level.story)), /* @__PURE__ */ React.createElement(CardContent, { className: "flex flex-col gap-5" }, /* @__PURE__ */ React.createElement("section", { className: "cipher-panel", "aria-label": "Ciphertext" }, /* @__PURE__ */ React.createElement("div", { className: "cipher-label" }, /* @__PURE__ */ React.createElement(LockKeyhole, { "aria-hidden": "true" }), " Pesan sandi"), /* @__PURE__ */ React.createElement("div", { className: "cipher-text", lang: level.type === "pigpen" ? void 0 : "zxx" }, /* @__PURE__ */ React.createElement(Cipher, { value: level.ciphertext }))), level.type === "scytale" && /* @__PURE__ */ React.createElement(ScytaleGrid, { level }), level.type === "rail" && /* @__PURE__ */ React.createElement(RailDiagram, { level }), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "mission-layout" }, /* @__PURE__ */ React.createElement(Card, { className: "mission-card" }, /* @__PURE__ */ React.createElement(CardHeader, null, /* @__PURE__ */ React.createElement(Badge, { variant: "secondary" }, "Level ", number(page + 1), " / ", number(missions.length)), /* @__PURE__ */ React.createElement(CardTitle, null, /* @__PURE__ */ React.createElement("h1", { tabIndex: -1 }, level.title)), /* @__PURE__ */ React.createElement(CardDescription, null, level.story), /* @__PURE__ */ React.createElement(ScoreStats, { key: page, record, since, total: score })), /* @__PURE__ */ React.createElement(CardContent, { className: "flex flex-col gap-5" }, /* @__PURE__ */ React.createElement("section", { className: "cipher-panel", "aria-label": "Ciphertext" }, /* @__PURE__ */ React.createElement("div", { className: "cipher-label" }, /* @__PURE__ */ React.createElement(LockKeyhole, { "aria-hidden": "true" }), " Pesan sandi"), /* @__PURE__ */ React.createElement("div", { className: "cipher-text", lang: level.type === "pigpen" ? void 0 : "zxx" }, /* @__PURE__ */ React.createElement(Cipher, { value: level.ciphertext }))), level.type === "scytale" && /* @__PURE__ */ React.createElement(ScytaleGrid, { level }), level.type === "rail" && /* @__PURE__ */ React.createElement(RailDiagram, { level }), /* @__PURE__ */ React.createElement(
     Answer,
     {
       key: page,
@@ -5283,7 +5287,7 @@ function RoomHUD({ page, records, since, score }) {
       "aria-current": index === page ? "step" : void 0
     },
     record.status === "solved" ? /* @__PURE__ */ React.createElement(Check, null) : /* @__PURE__ */ React.createElement(LockKeyhole, null)
-  )))), /* @__PURE__ */ React.createElement("section", { className: "room-score", "aria-label": "Waktu dan skor" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", null, "Waktu"), /* @__PURE__ */ React.createElement("strong", null, /* @__PURE__ */ React.createElement(Timer, { key: page, record: records[page], since }))), /* @__PURE__ */ React.createElement(Separator, { orientation: "vertical" }), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", null, "Skor"), /* @__PURE__ */ React.createElement("strong", { className: "tabular-nums" }, points.format(score)))));
+  )))), /* @__PURE__ */ React.createElement(ScoreStats, { key: page, record: records[page], since, total: score }));
 }
 function TouchMoves({ step }) {
   const directions = [
@@ -5374,7 +5378,7 @@ function App() {
   } }, /* @__PURE__ */ React.createElement(DialogContent, { className: "terminal-dialog", onCloseAutoFocus: (event) => {
     event.preventDefault();
     roomButton.current?.focus({ preventScroll: true });
-  } }, /* @__PURE__ */ React.createElement(DialogHeader, { className: "sr-only" }, /* @__PURE__ */ React.createElement(DialogTitle, null, "Terminal sandi"), /* @__PURE__ */ React.createElement(DialogDescription, null, "Tulis pesan aslinya untuk membuka kunci.")), /* @__PURE__ */ React.createElement(MissionView, { page, record: records[page], go, dispatch }))), /* @__PURE__ */ React.createElement(Dialog, { open: panel === "clue", onOpenChange: (open) => {
+  } }, /* @__PURE__ */ React.createElement(DialogHeader, { className: "sr-only" }, /* @__PURE__ */ React.createElement(DialogTitle, null, "Terminal sandi"), /* @__PURE__ */ React.createElement(DialogDescription, null, "Tulis pesan aslinya untuk membuka kunci.")), /* @__PURE__ */ React.createElement(MissionView, { page, record: records[page], since, score, go, dispatch }))), /* @__PURE__ */ React.createElement(Dialog, { open: panel === "clue", onOpenChange: (open) => {
     if (!open) setPanel("room");
   } }, /* @__PURE__ */ React.createElement(DialogContent, { onCloseAutoFocus: (event) => {
     event.preventDefault();
